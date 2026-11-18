@@ -1,0 +1,24 @@
+---
+# Single-node k3s server. k3s ships CoreDNS, the local-path storage class and
+# ServiceLB (klipper-lb), which gives LoadBalancer Services the node's IP.
+k3s_version: v1.37.2+k3s1
+k3s_install_script_url: https://get.k3s.io
+# Written to /etc/rancher/k3s/config.yaml. The bundled Traefik is disabled because
+# the posts install their own ingress controller (or none).
+k3s_config:
+  write-kubeconfig-mode: "0600"
+  disable:
+    - traefik
+# Extra keys merged into k3s_config (handy for per-site tweaks).
+k3s_config_extra: {}
+k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+# Helm, used by kubernetes.core.helm on the node.
+k3s_helm_version: v3.19.0
+k3s_helm_arch: amd64
+
+# Python virtualenv with the kubernetes client for kubernetes.core.k8s.
+# Ubuntu 24.04 ships python3-kubernetes 22.6, kubernetes.core 6 needs >= 24.2.
+k3s_python_venv: /opt/ansible-k8s
+k3s_python_packages:
+  - kubernetes==37.0.2

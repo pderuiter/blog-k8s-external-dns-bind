@@ -1,0 +1,11 @@
+include "{{ bind_external_dns_key_dir }}/external-dns.key";
+{% for zone in bind_external_dns_zones %}
+
+zone "{{ zone.name }}" {
+    type primary;
+    file "{{ bind_external_dns_zone_dir }}/{{ zone.file }}";
+    update-policy {
+        {{ zone.policy }}
+    };
+};
+{% endfor %}

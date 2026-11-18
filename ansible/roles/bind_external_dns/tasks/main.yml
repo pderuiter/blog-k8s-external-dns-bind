@@ -1,0 +1,140 @@
+---
+- name: Load OS family variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Create the key directory
+  ansible.builtin.file:
+    path: "{{ bind_external_dns_key_dir }}"
+    state: directory
+    owner: root
+    group: "{{ bind_install_group }}"
+    mode: "0750"
+
+- name: Generate the TSIG key for External-DNS
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      tsig-keygen -a {{ bind_external_dns_tsig_algorithm }} {{ bind_external_dns_tsig_keyname }}
+      > {{ bind_external_dns_key_dir }}/external-dns.key
+    executable: /bin/bash
+    creates: "{{ bind_external_dns_key_dir }}/external-dns.key"
+  notify: Restart named
+
+- name: Restrict the key file to root and named
+  ansible.builtin.file:
+    path: "{{ bind_external_dns_key_dir }}/external-dns.key"
+    owner: root
+    group: "{{ bind_install_group }}"
+    mode: "0640"
+
+- name: Create the dynamic zone directory
+  ansible.builtin.file:
+    path: "{{ bind_external_dns_zone_dir }}"
+    state: directory
+    owner: "{{ bind_install_user }}"
+    group: "{{ bind_install_group }}"
+    mode: "0770"
+
+- name: Create the initial zone files
+  ansible.builtin.template:
+    src: zone.j2
+    dest: "{{ bind_external_dns_zone_dir }}/{{ item.file }}"
+    owner: "{{ bind_install_user }}"
+    group: "{{ bind_install_group }}"
+    mode: "0644"
+    force: false
+  loop: "{{ bind_external_dns_zones }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Restart named
+
+- name: Open the listeners on RHEL
+  ansible.builtin.replace:
+    path: /etc/named.conf
+    regexp: "{{ item.regexp }}"
+    replace: "{{ item.replace }}"
+  loop:
+    - { regexp: 'listen-on port 53 \{ 127\.0\.0\.1; \};', replace: "listen-on port 53 { any; };" }
+    - { regexp: 'allow-query\s+\{ localhost; \};', replace: "allow-query { any; };" }
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - bind_external_dns_rhel_listen_any
+  notify: Restart named
+
+- name: Add the key include and the zones to the named configuration
+  ansible.builtin.blockinfile:
+    path: "{{ bind_external_dns_conf }}"
+    marker: "// {mark} ANSIBLE MANAGED: External-DNS zones"
+    block: "{{ lookup('ansible.builtin.template', 'zones.conf.j2') }}"
+    validate: named-checkconf %s
+  notify: Restart named
+
+- name: Configure the update log
+  when: bind_external_dns_update_log
+  block:
+    - name: Create the log directory
+      ansible.builtin.file:
+        path: "{{ bind_external_dns_log_dir }}"
+        state: directory
+        owner: "{{ bind_install_user }}"
+        group: "{{ bind_install_group }}"
+        mode: "0750"
+
+    # named accepts one logging block. Ubuntu's configuration has none; on RHEL the
+    # channel and categories go into the existing block.
+    - name: Add the update log channel (Debian)
+      ansible.builtin.blockinfile:
+        path: "{{ bind_install_options_conf }}"
+        marker: "// {mark} ANSIBLE MANAGED: update log"
+        block: |
+          logging {
+              channel update_log {
+                  file "{{ bind_external_dns_log_dir }}/update.log" versions 5 size 10m;
+                  severity debug;
+                  print-time yes;
+              };
+              category update { update_log; };
+              category update-security { update_log; };
+          };
+      when: ansible_facts['os_family'] == 'Debian'
+      notify: Restart named
+
+    - name: Add the update log channel (RHEL)
+      ansible.builtin.blockinfile:
+        path: /etc/named.conf
+        insertafter: '^logging \{'
+        marker: "// {mark} ANSIBLE MANAGED: update log"
+        block: |
+              channel update_log {
+                  file "{{ bind_external_dns_log_dir }}/update.log" versions 5 size 10m;
+                  severity debug;
+                  print-time yes;
+              };
+              category update { update_log; };
+              category update-security { update_log; };
+      when: ansible_facts['os_family'] == 'RedHat'
+      notify: Restart named
+
+- name: Check the zone files
+  ansible.builtin.command: named-checkzone {{ item.name }} {{ bind_external_dns_zone_dir }}/{{ item.file }}
+  loop: "{{ bind_external_dns_zones }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Start named
+  ansible.builtin.service:
+    name: "{{ bind_install_service }}"
+    state: started
+
+- name: Read the TSIG key
+  ansible.builtin.slurp:
+    src: "{{ bind_external_dns_key_dir }}/external-dns.key"
+  register: bind_external_dns_key_file
+  no_log: true
+
+# Same as: grep secret external-dns.key | cut -d '"' -f2
+- name: Extract the TSIG secret for the Kubernetes secret
+  ansible.builtin.set_fact:
+    bind_external_dns_tsig_secret: "{{ bind_external_dns_key_file.content | b64decode | regex_search('secret \"([^\"]+)\"', '\\1') | first }}"
+  no_log: true

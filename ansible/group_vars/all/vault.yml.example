@@ -1,0 +1,3 @@
+---
+# This setup has no secrets to provide: the TSIG key is generated on the BIND server.
+# cp vault.yml.example vault.yml only if you add your own vault_ variables.

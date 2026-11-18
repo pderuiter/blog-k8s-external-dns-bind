@@ -1,0 +1,6 @@
+---
+bind_external_dns_zones: >-
+  {{ [{'name': bind_external_dns_zone, 'file': bind_external_dns_zone_file, 'policy': bind_external_dns_update_policy}]
+     + ([{'name': bind_external_dns_reverse_zone, 'file': bind_external_dns_reverse_zone_file,
+          'policy': 'grant ' ~ bind_external_dns_tsig_keyname ~ ' zonesub PTR;'}]
+        if bind_external_dns_reverse_zone | length > 0 else []) }}

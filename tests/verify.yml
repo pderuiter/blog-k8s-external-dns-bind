@@ -1,0 +1,93 @@
+---
+# Functional check, as in the post: a LoadBalancer Service with the hostname
+# annotation gets an A record in BIND, and loses it again when it is deleted.
+#   ansible-playbook -i ansible/inventory.yml tests/verify.yml
+- name: Create a demo Service
+  hosts: k8s
+  vars:
+    ansible_python_interpreter: "{{ k3s_python_venv | default('/opt/ansible-k8s') }}/bin/python"
+    verify_hostname: "myapp.{{ external_dns_zone | default('k8s.example.com') }}"
+  environment:
+    K8S_AUTH_KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Deploy the demo app and its Service
+      kubernetes.core.k8s:
+        state: present
+        wait: true
+        definition:
+          - apiVersion: apps/v1
+            kind: Deployment
+            metadata: {name: my-app, namespace: default}
+            spec:
+              replicas: 1
+              selector: {matchLabels: {app: my-app}}
+              template:
+                metadata: {labels: {app: my-app}}
+                spec:
+                  containers:
+                    - name: web
+                      image: traefik/whoami:v1.11
+                      args: ["--port=8080"]
+          - apiVersion: v1
+            kind: Service
+            metadata:
+              name: my-app
+              namespace: default
+              annotations:
+                external-dns.alpha.kubernetes.io/hostname: "{{ verify_hostname }}"
+            spec:
+              type: LoadBalancer
+              ports: [{port: 80, targetPort: 8080}]
+              selector: {app: my-app}
+
+- name: Check the record on the BIND server
+  hosts: dns
+  gather_facts: false
+  vars:
+    verify_hostname: "myapp.{{ external_dns_zone | default('k8s.example.com') }}"
+  tasks:
+    - name: Wait for the A record
+      ansible.builtin.command: dig +short @127.0.0.1 {{ verify_hostname }} A
+      register: verify_a
+      retries: 20
+      delay: 6
+      until: verify_a.stdout | length > 0
+      changed_when: false
+
+    - name: Show the A and TXT records
+      ansible.builtin.command: dig +noall +answer @127.0.0.1 {{ verify_hostname }} ANY
+      register: verify_any
+      changed_when: false
+
+    - name: Print them
+      ansible.builtin.debug:
+        msg: "{{ verify_any.stdout_lines }}"
+
+- name: Delete the demo Service
+  hosts: k8s
+  vars:
+    ansible_python_interpreter: "{{ k3s_python_venv | default('/opt/ansible-k8s') }}/bin/python"
+  environment:
+    K8S_AUTH_KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Delete the demo app and Service
+      kubernetes.core.k8s:
+        state: absent
+        wait: true
+        definition:
+          - {apiVersion: v1, kind: Service, metadata: {name: my-app, namespace: default}}
+          - {apiVersion: apps/v1, kind: Deployment, metadata: {name: my-app, namespace: default}}
+
+- name: Check that the record is gone (--policy=sync)
+  hosts: dns
+  gather_facts: false
+  vars:
+    verify_hostname: "myapp.{{ external_dns_zone | default('k8s.example.com') }}"
+  tasks:
+    - name: Wait until the A record is removed
+      ansible.builtin.command: dig +short @127.0.0.1 {{ verify_hostname }} A
+      register: verify_gone
+      retries: 20
+      delay: 6
+      until: verify_gone.stdout | length == 0
+      changed_when: false

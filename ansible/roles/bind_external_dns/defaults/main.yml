@@ -1,0 +1,27 @@
+---
+bind_external_dns_zone: k8s.example.com
+bind_external_dns_tsig_keyname: external-dns-key
+bind_external_dns_tsig_algorithm: hmac-sha256
+
+bind_external_dns_zone_file: "{{ bind_external_dns_zone }}.zone"
+# The post's update-policy for the forward zone. "subdomain" (Security Considerations)
+# limits the key further: "grant {{ bind_external_dns_tsig_keyname }} subdomain {{ bind_external_dns_zone }} ANY;"
+bind_external_dns_update_policy: "grant {{ bind_external_dns_tsig_keyname }} zonesub ANY;"
+
+# Optional reverse zone (empty = skip).
+bind_external_dns_reverse_zone: ""
+bind_external_dns_reverse_zone_file: ""
+
+# Initial SOA/NS of the zone files (only written when the file does not exist yet,
+# because named rewrites the zone through dynamic updates).
+bind_external_dns_soa_mname: ns1.example.com.
+bind_external_dns_soa_rname: admin.example.com.
+bind_external_dns_ns: ns1.example.com.
+
+# Write the post's update log channel (troubleshooting section). It goes into
+# named.conf.options on Debian and into named.conf on RHEL as a separate file include.
+bind_external_dns_update_log: false
+
+# RHEL's stock named.conf only listens on and answers 127.0.0.1. Open it up so
+# External-DNS can reach the server (Ubuntu's default already listens on all addresses).
+bind_external_dns_rhel_listen_any: true

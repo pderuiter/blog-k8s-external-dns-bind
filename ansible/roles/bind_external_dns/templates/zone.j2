@@ -1,0 +1,10 @@
+; {{ bind_external_dns_zone_dir }}/{{ item.file }}
+$TTL 300
+@   IN  SOA {{ bind_external_dns_soa_mname }} {{ bind_external_dns_soa_rname }} (
+        2024010101  ; Serial
+        3600        ; Refresh
+        1800        ; Retry
+        604800      ; Expire
+        300 )       ; Minimum TTL
+
+    IN  NS  {{ bind_external_dns_ns }}

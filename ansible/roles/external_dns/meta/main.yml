@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: external_dns
+  author: Patrick de Ruiter
+  description: External-DNS v0.14 with the RFC2136 provider, RBAC and an egress NetworkPolicy
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+dependencies: []

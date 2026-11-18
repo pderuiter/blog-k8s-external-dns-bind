@@ -1,0 +1,41 @@
+---
+- name: Create the namespace
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Namespace
+    name: "{{ external_dns_namespace }}"
+    state: present
+
+- name: Create the TSIG secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: external-dns-tsig
+        namespace: "{{ external_dns_namespace }}"
+      type: Opaque
+      stringData:
+        tsig-secret: "{{ external_dns_tsig_secret }}"
+  no_log: true
+
+- name: Apply the RBAC objects
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'rbac.yml.j2') | ansible.builtin.from_yaml_all | list }}"
+
+- name: Apply the NetworkPolicy
+  kubernetes.core.k8s:
+    state: "{{ 'present' if external_dns_network_policy else 'absent' }}"
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy.yml.j2') | ansible.builtin.from_yaml }}"
+
+- name: Deploy External-DNS
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'deployment.yml.j2') | ansible.builtin.from_yaml }}"
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 300

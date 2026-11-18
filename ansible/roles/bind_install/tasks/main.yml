@@ -1,0 +1,44 @@
+---
+- name: Load OS family variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Check that the ISC packages are requested on a supported OS
+  ansible.builtin.assert:
+    that:
+      - bind_install_source == 'distro' or ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: "bind_install_source=isc is only implemented for Ubuntu (ppa:isc/bind)"
+    quiet: true
+
+- name: Add the ISC BIND PPA
+  ansible.builtin.apt_repository:
+    repo: "{{ bind_install_isc_ppa }}"
+    state: present
+    update_cache: true
+  when: bind_install_source == 'isc'
+
+- name: Install BIND
+  ansible.builtin.package:
+    name: "{{ bind_install_packages }}"
+    state: present
+
+- name: Read the installed BIND version
+  ansible.builtin.command: named -v
+  register: bind_install_version_cmd
+  changed_when: false
+
+- name: Set the installed BIND version fact
+  ansible.builtin.set_fact:
+    bind_install_version: "{{ bind_install_version_cmd.stdout | regex_search('BIND ([0-9.]+)', '\\1') | first }}"
+
+- name: Check the minimum BIND version
+  ansible.builtin.assert:
+    that:
+      - bind_install_version is version(bind_install_min_version, '>=')
+    fail_msg: "BIND {{ bind_install_version }} is installed, this setup needs {{ bind_install_min_version }} or later (set bind_install_source: isc)"
+    quiet: true
+  when: bind_install_min_version | length > 0
+
+- name: Enable the named service
+  ansible.builtin.service:
+    name: "{{ bind_install_service }}"
+    enabled: true

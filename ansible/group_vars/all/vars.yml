@@ -1,0 +1,18 @@
+---
+# Values from the post. The TSIG secret is generated on the BIND server with
+# tsig-keygen and handed to Kubernetes by the playbook; there is nothing to put in a vault.
+external_dns_zone: k8s.example.com
+external_dns_tsig_keyname: external-dns-key
+external_dns_txt_owner_id: k8s-cluster
+
+# Reverse zone from the post (External-DNS v0.14 does not write PTR records for RFC2136).
+bind_external_dns_reverse_zone: 1.168.192.in-addr.arpa
+bind_external_dns_reverse_zone_file: 192.168.1.rev
+
+# Shared by the k3s role and the plays that talk to the cluster.
+k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+k3s_python_venv: /opt/ansible-k8s
+
+# The BIND role uses the same zone and key.
+bind_external_dns_zone: "{{ external_dns_zone }}"
+bind_external_dns_tsig_keyname: "{{ external_dns_tsig_keyname }}"

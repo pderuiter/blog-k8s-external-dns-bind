@@ -1,0 +1,29 @@
+---
+external_dns_namespace: external-dns
+external_dns_image: registry.k8s.io/external-dns/external-dns:v0.14.2
+
+# BIND server (RFC2136). Defaults to the first host in the dns group.
+external_dns_rfc2136_host: "{{ hostvars[groups['dns'][0]]['ansible_host'] | default(groups['dns'][0]) }}"
+external_dns_rfc2136_port: 53
+external_dns_zone: k8s.example.com
+external_dns_tsig_keyname: external-dns-key
+external_dns_tsig_algorithm: hmac-sha256
+# The secret from tsig-keygen; defaults to the one the bind_external_dns role read.
+external_dns_tsig_secret: "{{ hostvars[groups['dns'][0]]['bind_external_dns_tsig_secret'] }}"
+
+external_dns_sources:
+  - service
+  - ingress
+external_dns_domain_filters:
+  - "{{ external_dns_zone }}"
+external_dns_policy: sync
+external_dns_txt_owner_id: k8s-cluster
+external_dns_interval: 30s
+external_dns_log_level: info
+# Extra arguments, e.g. --txt-prefix=_edns-prod- or --annotation-filter=...
+external_dns_extra_args: []
+
+# The NetworkPolicy from "Security Considerations": egress only to BIND (53) and to
+# the API server. On k3s the API server listens on the node itself, port 6443.
+external_dns_network_policy: true
+external_dns_api_server_cidrs: "{{ [ansible_facts['default_ipv4']['address'] ~ '/32'] }}"

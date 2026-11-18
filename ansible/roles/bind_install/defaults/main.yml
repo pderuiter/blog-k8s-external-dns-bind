@@ -1,0 +1,7 @@
+---
+# distro: the BIND that ships with the OS (9.18 on Ubuntu 24.04).
+# isc:    the ISC packages (ppa:isc/bind on Ubuntu), needed for BIND 9.20 features such as DoT forwarding.
+bind_install_source: distro
+bind_install_isc_ppa: "ppa:isc/bind"
+# Fail when the installed BIND is older than this (empty = no check).
+bind_install_min_version: ""

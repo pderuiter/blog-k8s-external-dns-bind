@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-dns
+  namespace: {{ external_dns_namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: external-dns
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS to BIND server
+    - to:
+        - ipBlock:
+            cidr: {{ external_dns_rfc2136_host }}/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow API server access. The kubernetes Service (443) is translated
+    # to the control-plane endpoints (usually :6443) before the policy is
+    # checked, and those are host IPs that no namespaceSelector matches.
+    - to:
+{% for cidr in external_dns_api_server_cidrs %}
+        - ipBlock:
+            cidr: {{ cidr }}
+{% endfor %}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

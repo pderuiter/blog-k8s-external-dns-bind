@@ -1,0 +1,97 @@
+---
+- name: Create the k3s configuration directory
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the k3s configuration
+  ansible.builtin.copy:
+    content: "{{ k3s_config | combine(k3s_config_extra) | to_nice_yaml(indent=2) }}"
+    dest: /etc/rancher/k3s/config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart k3s
+
+- name: Read the installed k3s version
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Install k3s
+  when: k3s_version not in (k3s_installed_version.stdout | default(''))
+  block:
+    - name: Download the k3s install script
+      ansible.builtin.get_url:
+        url: "{{ k3s_install_script_url }}"
+        dest: /usr/local/bin/k3s-install.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run the k3s install script
+      ansible.builtin.command: /usr/local/bin/k3s-install.sh
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+      changed_when: true
+
+- name: Start and enable k3s
+  ansible.builtin.service:
+    name: k3s
+    state: started
+    enabled: true
+
+- name: Flush handlers so a changed configuration is active before the wait
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait until the node is Ready
+  ansible.builtin.command: >-
+    /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=300s
+  register: k3s_node_ready
+  retries: 10
+  delay: 10
+  until: k3s_node_ready.rc == 0
+  changed_when: false
+
+- name: Check the installed Helm version
+  ansible.builtin.stat:
+    path: "/opt/helm-{{ k3s_helm_version }}/linux-{{ k3s_helm_arch }}/helm"
+  register: k3s_helm_binary
+
+- name: Install Helm
+  when: not k3s_helm_binary.stat.exists
+  block:
+    - name: Create the Helm directory
+      ansible.builtin.file:
+        path: "/opt/helm-{{ k3s_helm_version }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download and unpack Helm
+      ansible.builtin.unarchive:
+        src: "https://get.helm.sh/helm-{{ k3s_helm_version }}-linux-{{ k3s_helm_arch }}.tar.gz"
+        dest: "/opt/helm-{{ k3s_helm_version }}"
+        remote_src: true
+
+- name: Link helm into the PATH
+  ansible.builtin.file:
+    src: "/opt/helm-{{ k3s_helm_version }}/linux-{{ k3s_helm_arch }}/helm"
+    dest: /usr/local/bin/helm
+    state: link
+
+- name: Install python3-venv (and packaging, which the pip module needs)
+  ansible.builtin.package:
+    name: "{{ ['python3-venv', 'python3-packaging'] if ansible_facts['os_family'] == 'Debian' else ['python3-pip', 'python3-packaging'] }}"
+    state: present
+
+- name: Install the kubernetes Python client in a virtualenv
+  ansible.builtin.pip:
+    name: "{{ k3s_python_packages }}"
+    virtualenv: "{{ k3s_python_venv }}"
+    virtualenv_command: python3 -m venv

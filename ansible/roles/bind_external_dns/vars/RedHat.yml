@@ -1,0 +1,5 @@
+---
+bind_external_dns_key_dir: /etc/named/keys
+bind_external_dns_zone_dir: /var/named/dynamic
+bind_external_dns_conf: /etc/named.conf
+bind_external_dns_log_dir: /var/log/named

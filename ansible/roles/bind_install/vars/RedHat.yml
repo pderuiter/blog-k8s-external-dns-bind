@@ -1,0 +1,13 @@
+---
+bind_install_packages:
+  - bind
+  - bind-utils
+bind_install_service: named
+bind_install_user: named
+bind_install_group: named
+bind_install_conf_dir: /etc
+bind_install_main_conf: /etc/named.conf
+bind_install_options_conf: /etc/named.conf
+bind_install_local_conf: /etc/named.conf
+bind_install_data_dir: /var/named
+bind_install_zone_dir: /var/named

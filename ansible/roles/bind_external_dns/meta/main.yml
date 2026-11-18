@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: bind_external_dns
+  author: Patrick de Ruiter
+  description: BIND zones and a TSIG key that accept RFC2136 updates from External-DNS
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: EL
+      versions:
+        - "9"
+dependencies: []
