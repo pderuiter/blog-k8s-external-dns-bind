@@ -1,6 +1,7 @@
 ---
 # Functional check, as in the post: a LoadBalancer Service with the hostname
 # annotation gets an A record in BIND, and loses it again when it is deleted.
+# The same is then done for a Gateway API HTTPRoute (--source=gateway-httproute).
 #   ansible-playbook -i ansible/inventory.yml tests/verify.yml
 - name: Create a demo Service
   hosts: k8s
@@ -90,4 +91,99 @@
       retries: 20
       delay: 6
       until: verify_gone.stdout | length == 0
+      changed_when: false
+
+- name: Create a Gateway and an HTTPRoute
+  hosts: k8s
+  vars:
+    ansible_python_interpreter: "{{ k3s_python_venv | default('/opt/ansible-k8s') }}/bin/python"
+    verify_route_hostname: "myroute.{{ external_dns_zone | default('k8s.example.com') }}"
+    # Documentation address (RFC 5737) for the Gateway; nothing has to answer on it.
+    verify_gateway_address: 192.0.2.50
+  environment:
+    K8S_AUTH_KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Apply the GatewayClass, Gateway and HTTPRoute
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: GatewayClass
+            metadata: {name: verify}
+            spec: {controllerName: example.com/verify}
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: Gateway
+            metadata: {name: my-gateway, namespace: default}
+            spec:
+              gatewayClassName: verify
+              listeners: [{name: http, protocol: HTTP, port: 80}]
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: HTTPRoute
+            metadata: {name: my-app-route, namespace: default}
+            spec:
+              parentRefs: [{name: my-gateway}]
+              hostnames: ["{{ verify_route_hostname }}"]
+              rules:
+                - matches: [{path: {type: PathPrefix, value: /}}]
+                  backendRefs: [{name: my-app, port: 80}]
+
+    # There is no Gateway controller in this test. Write the status fields a controller
+    # would set: the Gateway's address and the route's Accepted condition. External-DNS
+    # only publishes routes that their parent Gateway has accepted.
+    - name: Set the Gateway address in its status
+      ansible.builtin.command: >-
+        /usr/local/bin/k3s kubectl patch gateway my-gateway -n default --subresource=status --type=merge
+        -p '{"status":{"addresses":[{"type":"IPAddress","value":"{{ verify_gateway_address }}"}]}}'
+      changed_when: true
+
+    - name: Mark the HTTPRoute as accepted by the Gateway
+      ansible.builtin.command: >-
+        /usr/local/bin/k3s kubectl patch httproute my-app-route -n default --subresource=status --type=merge
+        -p '{"status":{"parents":[{"parentRef":{"group":"gateway.networking.k8s.io","kind":"Gateway","name":"my-gateway"},
+        "controllerName":"example.com/verify","conditions":[{"type":"Accepted","status":"True","reason":"Accepted",
+        "message":"verify","lastTransitionTime":"{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"}]}]}}'
+      changed_when: true
+
+- name: Check the HTTPRoute record on the BIND server
+  hosts: dns
+  gather_facts: false
+  vars:
+    verify_route_hostname: "myroute.{{ external_dns_zone | default('k8s.example.com') }}"
+  tasks:
+    - name: Wait for the A record of the HTTPRoute
+      ansible.builtin.command: dig +short @127.0.0.1 {{ verify_route_hostname }} A
+      register: verify_route_a
+      retries: 20
+      delay: 6
+      until: verify_route_a.stdout == '192.0.2.50'
+      changed_when: false
+
+- name: Delete the Gateway API objects
+  hosts: k8s
+  vars:
+    ansible_python_interpreter: "{{ k3s_python_venv | default('/opt/ansible-k8s') }}/bin/python"
+  environment:
+    K8S_AUTH_KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Delete the HTTPRoute, Gateway and GatewayClass
+      kubernetes.core.k8s:
+        state: absent
+        wait: true
+        definition:
+          - {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: my-app-route, namespace: default}}
+          - {apiVersion: gateway.networking.k8s.io/v1, kind: Gateway, metadata: {name: my-gateway, namespace: default}}
+          - {apiVersion: gateway.networking.k8s.io/v1, kind: GatewayClass, metadata: {name: verify}}
+
+- name: Check that the HTTPRoute record is gone
+  hosts: dns
+  gather_facts: false
+  vars:
+    verify_route_hostname: "myroute.{{ external_dns_zone | default('k8s.example.com') }}"
+  tasks:
+    - name: Wait until the A record of the HTTPRoute is removed
+      ansible.builtin.command: dig +short @127.0.0.1 {{ verify_route_hostname }} A
+      register: verify_route_gone
+      retries: 20
+      delay: 6
+      until: verify_route_gone.stdout | length == 0
       changed_when: false

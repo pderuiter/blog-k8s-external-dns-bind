@@ -20,6 +20,36 @@
         tsig-secret: "{{ external_dns_tsig_secret }}"
   no_log: true
 
+- name: Look for the HTTPRoute CRD
+  kubernetes.core.k8s_info:
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: httproutes.gateway.networking.k8s.io
+  register: external_dns_httproute_crd
+  when: "'gateway-httproute' in external_dns_sources"
+
+- name: Install the Gateway API CRDs
+  when:
+    - "'gateway-httproute' in external_dns_sources"
+    - external_dns_gateway_api_crds | bool
+    - external_dns_httproute_crd.resources | length == 0
+  block:
+    - name: Download the Gateway API standard-channel manifest
+      ansible.builtin.get_url:
+        url: "{{ external_dns_gateway_api_crds_url }}"
+        dest: "/opt/gateway-api-{{ external_dns_gateway_api_version }}-standard-install.yaml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Apply the Gateway API CRDs
+      kubernetes.core.k8s:
+        state: present
+        src: "/opt/gateway-api-{{ external_dns_gateway_api_version }}-standard-install.yaml"
+        apply: true
+        server_side_apply:
+          field_manager: ansible-external-dns
+
 - name: Apply the RBAC objects
   kubernetes.core.k8s:
     state: present

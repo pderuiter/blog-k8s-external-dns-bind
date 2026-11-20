@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: external_dns
   author: Patrick de Ruiter
-  description: External-DNS v0.14 with the RFC2136 provider, RBAC and an egress NetworkPolicy
+  description: External-DNS v0.14 with the RFC2136 provider, RBAC, an egress NetworkPolicy and the Gateway API CRDs
   license: MIT
   min_ansible_version: "2.16"
   platforms:

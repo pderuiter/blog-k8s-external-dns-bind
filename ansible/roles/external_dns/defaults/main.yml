@@ -14,6 +14,16 @@ external_dns_tsig_secret: "{{ hostvars[groups['dns'][0]]['bind_external_dns_tsig
 external_dns_sources:
   - service
   - ingress
+  - gateway-httproute
+
+# gateway-httproute needs the Gateway API CRDs: without them External-DNS exits with
+# "failed to sync *v1.HTTPRoute". k3s v1.37 ships them (its gateway-api-crd HelmChart).
+# On a cluster without an HTTPRoute CRD, the role installs the standard-channel CRDs
+# below when gateway-httproute is in external_dns_sources and this is true.
+external_dns_gateway_api_crds: true
+external_dns_gateway_api_version: v1.7.0
+external_dns_gateway_api_crds_url: >-
+  https://github.com/kubernetes-sigs/gateway-api/releases/download/{{ external_dns_gateway_api_version }}/standard-install.yaml
 external_dns_domain_filters:
   - "{{ external_dns_zone }}"
 external_dns_policy: sync

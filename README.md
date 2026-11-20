@@ -9,7 +9,8 @@ It builds the setup from the post. It creates two Ubuntu 24.04 VMs:
 
 The cluster uses the post's ServiceAccount/ClusterRole, Deployment and egress NetworkPolicy. A LoadBalancer Service
 with an `external-dns.alpha.kubernetes.io/hostname` annotation then gets an A record (plus the TXT ownership records)
-in BIND, and the records are removed again when the Service goes away.
+in BIND, and the records are removed again when the Service goes away. With `--source=gateway-httproute`, a
+Gateway API HTTPRoute's `spec.hostnames` get records the same way.
 
 ## What's in here
 
@@ -19,9 +20,9 @@ in BIND, and the records are removed again when the Service goes away.
 | `ansible/roles/bind_install` | Installs BIND (Ubuntu 24.04: 9.18; RHEL 9: 9.16). |
 | `ansible/roles/bind_external_dns` | The post's BIND part. It runs `tsig-keygen -a hmac-sha256 external-dns-key` (key mode 0640, group `bind`/`named`), creates the `type primary` zone(s) with `update-policy { grant external-dns-key zonesub ANY; }` and the initial zone file, and can add the optional reverse zone and the `update_log` channel. Paths follow the OS: `/etc/named/keys` and `/var/named/dynamic` on RHEL, as in the post; `/etc/bind/keys` and `/var/lib/bind/dynamic` on Debian/Ubuntu. |
 | `ansible/roles/k3s` | k3s v1.37.2+k3s1 (its bundled Traefik disabled), Helm v3.19.0, and a virtualenv with the kubernetes Python client for `kubernetes.core`. |
-| `ansible/roles/external_dns` | Namespace, the `external-dns-tsig` Secret (the secret is read from the key file on the BIND server), RBAC, the NetworkPolicy (BIND on 53, the API server on 443/6443) and the Deployment. The secret is passed as `EXTERNAL_DNS_RFC2136_TSIG_SECRET`. |
+| `ansible/roles/external_dns` | Namespace, the `external-dns-tsig` Secret (the secret is read from the key file on the BIND server), RBAC, the NetworkPolicy (BIND on 53, the API server on 443/6443) and the Deployment with the `service`, `ingress` and `gateway-httproute` sources. The secret is passed as `EXTERNAL_DNS_RFC2136_TSIG_SECRET`. If the cluster has no HTTPRoute CRD, it installs the Gateway API v1.7.0 standard-channel CRDs (k3s v1.37 already ships them). |
 | `ansible/site.yml` | BIND, then k3s, then External-DNS. |
-| `tests/verify.yml` | The post's check: deploys `my-app` with a LoadBalancer Service for `myapp.k8s.example.com`, waits for the A record on BIND, deletes the Service and waits for the record to disappear. |
+| `tests/verify.yml` | The post's check: deploys `my-app` with a LoadBalancer Service for `myapp.k8s.example.com`, waits for the A record on BIND, deletes the Service and waits for the record to disappear. Then the same for an HTTPRoute (`myroute.k8s.example.com`); there is no Gateway controller, so the test writes the Gateway address (192.0.2.50) and the route's `Accepted` condition into their status itself. |
 
 k3s's ServiceLB gives LoadBalancer Services the node's IP, so `status.loadBalancer.ingress` is filled in without
 MetalLB or a cloud load balancer.
@@ -68,7 +69,9 @@ sudo k3s kubectl logs -n external-dns deployment/external-dns -f
 | `external_dns_tsig_keyname` | `external-dns-key` | TSIG key name |
 | `external_dns_txt_owner_id` | `k8s-cluster` | `--txt-owner-id` |
 | `external_dns_image` | `registry.k8s.io/external-dns/external-dns:v0.14.2` | External-DNS image |
-| `external_dns_sources` | `[service, ingress]` | `--source` flags; add `gateway-httproute` for Gateway API |
+| `external_dns_sources` | `[service, ingress, gateway-httproute]` | `--source` flags |
+| `external_dns_gateway_api_crds` | `true` | Install the Gateway API CRDs when `gateway-httproute` is a source and the cluster has no HTTPRoute CRD |
+| `external_dns_gateway_api_version` | `v1.7.0` | Gateway API release for those CRDs |
 | `external_dns_policy` | `sync` | `--policy` (`upsert-only` never deletes) |
 | `external_dns_extra_args` | `[]` | Extra flags, e.g. `--txt-prefix=_edns-prod-` or `--annotation-filter=...` |
 | `external_dns_rfc2136_host` | first host in `dns` | BIND server address |
@@ -87,6 +90,8 @@ sudo k3s kubectl logs -n external-dns deployment/external-dns -f
 NetworkPolicy active:
 - `myapp.k8s.example.com` got `A <node IP>` and the TXT ownership record (TTL 0).
 - The records were removed after the Service was deleted.
+- `myroute.k8s.example.com` (HTTPRoute) got `A 192.0.2.50` and was removed after the route was deleted. This was run
+  with k3s's own Gateway API CRDs and again with them disabled, so the role installed v1.7.0 (second run `changed=0`).
 - `update.log` showed the `adding an RR` entries.
 
 The RHEL code paths (`/etc/named.conf`, opening `listen-on`/`allow-query`) were not run. ansible-lint (production
